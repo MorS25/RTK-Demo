@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="isoblue">#093a8f</color>
+       <color name="raserorange">#0c53bd</color>
+       <color name="raserpink">#cc1447</color>
+       <color name="kayak">#ec6200</color>
+     <color name="white">#FFFFFF</color>
+    <color name='turtle'>#42ecdf</color>
+         <color name="grey">#a6a6a6</color>
+    
+</resources>

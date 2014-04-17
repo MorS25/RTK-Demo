@@ -1,5 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
@@ -10,30 +9,22 @@
     android:paddingTop="@dimen/activity_vertical_margin"
     tools:context=".TMap" >
 
-	<fragment
-	    android:id="@+id/map"
-	    android:name="com.google.android.gms.maps.MapFragment"
-	    android:layout_width="fill_parent"
-	    android:layout_height="fill_parent"
-	    android:layout_below="@+id/requestbutton" />
+    <ImageView
+        android:id="@+id/imageView1"
+        android:layout_width="500dp"
+        android:layout_height="900dp"
+        android:layout_marginLeft="21dp"
+        android:layout_marginTop="15dp"
+        android:scaleType="fitXY" />
 
-	<Button
-	    android:id="@+id/requestbutton"
-	    android:layout_width="wrap_content"
-	    android:layout_height="wrap_content"
-	    android:layout_alignParentTop="true"
-	    android:layout_alignRight="@+id/map"
-	    android:text="Connect" />
+    <TextView
+        android:id="@+id/textView1"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignLeft="@+id/imageView1"
+        android:layout_alignRight="@+id/imageView1"
+        android:text="Not Connected"
+        android:textColor="@color/grey"
+        android:textSize="15sp" />
 
-	<TextView
-	    android:id="@+id/textView1"
-	    android:layout_width="wrap_content"
-	    android:layout_height="wrap_content"
-	    android:layout_alignBaseline="@+id/requestbutton"
-	    android:layout_alignBottom="@+id/requestbutton"
-	    android:layout_alignLeft="@+id/map"
-	    android:text="BBB Address"
-	    android:textSize="20dp" />
-    
 </RelativeLayout>
-
