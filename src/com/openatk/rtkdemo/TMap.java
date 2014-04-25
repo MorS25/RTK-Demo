@@ -9,12 +9,18 @@ import android.app.Activity;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.DashPathEffect;
 import android.graphics.Paint;
+import android.graphics.Paint.Style;
 import android.graphics.Point;
 import android.graphics.drawable.ColorDrawable;
 import android.util.Log;
+import android.view.GestureDetector;
+import android.view.GestureDetector.SimpleOnGestureListener;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.MotionEvent;
+import android.view.View;
 
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -48,9 +54,8 @@ public class TMap extends Activity {
 	public static final int SHOW_TOAST = 0x05;
 	
 	public GoogleMap mMap;
-	public ArrayList<LatLng> gplist;
+	public ArrayList<RTKPoint> gplist;
 	public LatLng referenceLatLng;
-	public static float aprx_latlng_per_cm = 0.0000001f;
 	public Menu myMenu;
 	private String serverAddress;
 
@@ -63,13 +68,24 @@ public class TMap extends Activity {
 
 	//NW to NE : Top
 	private LatLng NW = new LatLng(40.429932932,-86.911030507); //Top Left
-	private LatLng NE = new LatLng(40.429949890,-86.911030507); //Long_dist Right
+	private LatLng NE = new LatLng(40.429932932,-86.911030507); //Long_dist Right
 	//SW to SE : Bottom
 	private LatLng SW = new LatLng(40.429932932,-86.911053802); //Bottom Left
-	private LatLng SE = new LatLng(40.429949890,-86.911053802); //Bottom Right
+	private LatLng SE = new LatLng(40.429932932,-86.911053802); //Bottom Right
 	
 	private double MIN_LATITUDE, MAX_LATITUDE;
 	private double MIN_LONGITUDE, MAX_LONGITUDE;
+	private double LATDELTA = 0.000011;
+	private double LONDELTA = 0.00001;
+	
+    private static final int SWIPE_MAX_OFF_PATH = 1000;
+    private GestureDetector gestureDetector;
+    
+    View.OnTouchListener gestureListener;
+    
+    
+    private boolean useManualScrolling;
+    
 	
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -80,7 +96,7 @@ public class TMap extends Activity {
 		bar.setBackgroundDrawable(new ColorDrawable(getResources().getColor(R.color.raserorange)));
 		pathPivots = new ArrayList<Integer>();
 		
-    	gplist = new ArrayList<LatLng>();
+    	gplist = new ArrayList<RTKPoint>();
     	canvas_width = 500;
     	canvas_height = 900;
 		canvas = (ImageView)this.findViewById(R.id.imageView1);
@@ -90,7 +106,17 @@ public class TMap extends Activity {
 		colorScheme.add(getResources().getColor(R.color.kayak));
 		colorScheme.add(Color.GREEN);
 		colorScheme.add(getResources().getColor(R.color.turtle));
-
+		
+		
+		//Assign gesture listener
+        gestureDetector = new GestureDetector(this, new MyGestureDetector());
+        gestureListener = new View.OnTouchListener() {
+            public boolean onTouch(View v, MotionEvent event) {
+                return gestureDetector.onTouchEvent(event);
+            }
+        };
+        canvas.setOnTouchListener(gestureListener);
+        useManualScrolling = false;
 	}
 
 	public void setLabelValue(String val){
@@ -114,54 +140,62 @@ public class TMap extends Activity {
 					//Parse Received DATA
 					
 					String [] j = (String []) msg.obj;
-					setLabelValue(j[1] + ": " + j[2] + "," + j[3]);
-					LatLng myPoint = new LatLng(Double.parseDouble(j[2]),Double.parseDouble(j[3]));
+					setLabelValue(j[1] + ": " + j[2] + "," + j[3] + "(Q:" + j[5] + ")");
+					LatLng myCoordinate = new LatLng(Double.parseDouble(j[2]),Double.parseDouble(j[3]));
+					int QValue = Integer.parseInt(j[5]);
 					
+					RTKPoint myPoint = new RTKPoint(QValue, myCoordinate);
+					
+					//if(QValue == 1){
 					if(gplist.size() == 0){
 						//We "may" use this as reference point to set screen boundary
 
-						referenceLatLng = myPoint;
+						referenceLatLng = myPoint.coordinate;
 						//Init Max-Min 
 						//TODO: Use Heap? Maybe overkill for demo
-						MIN_LATITUDE = myPoint.latitude;
-						MIN_LONGITUDE = myPoint.longitude;
-						MAX_LATITUDE = MIN_LATITUDE;
-						MAX_LONGITUDE = MIN_LONGITUDE;
+						if(!useManualScrolling){
+							MIN_LATITUDE = myPoint.coordinate.latitude;
+							MIN_LONGITUDE = myPoint.coordinate.longitude;
+							MAX_LATITUDE = MIN_LATITUDE;
+							MAX_LONGITUDE = MIN_LONGITUDE;
+						}
 					}else{ 
 						//If gplist has data, check it against current point
-						if(GeoUtil.SameLatLng(myPoint, gplist.get(gplist.size() - 1))){
+						if(GeoUtil.SameLatLng(myPoint.coordinate, gplist.get(gplist.size() - 1).coordinate)){
 							//don't feed repetitive point over and over
 							//save some memory
 							break;
 						}
 						
+						if(!useManualScrolling){
 						
-						//Rescale 4 calibration points
-						if(myPoint.latitude > MAX_LATITUDE){
-							MAX_LATITUDE = myPoint.latitude;
-						}
-						if(myPoint.longitude > MAX_LONGITUDE){
-							MAX_LONGITUDE = myPoint.longitude;
-						}
-						if(myPoint.latitude < MIN_LATITUDE){
-							MIN_LATITUDE = myPoint.latitude;
-						}
-						if(myPoint.longitude < MIN_LONGITUDE){
-							MIN_LONGITUDE = myPoint.longitude;
+							//Rescale 4 calibration points
+							if(myPoint.coordinate.latitude > MAX_LATITUDE){
+								MAX_LATITUDE = myPoint.coordinate.latitude;
+							}
+							if(myPoint.coordinate.longitude > MAX_LONGITUDE){
+								MAX_LONGITUDE = myPoint.coordinate.longitude;
+							}
+							if(myPoint.coordinate.latitude < MIN_LATITUDE){
+								MIN_LATITUDE = myPoint.coordinate.latitude;
+							}
+							if(myPoint.coordinate.longitude < MIN_LONGITUDE){
+								MIN_LONGITUDE = myPoint.coordinate.longitude;
+							}
+						
+							updateBounds();
 						}
 						
-
-						NW = new LatLng(MIN_LATITUDE - 0.000004,MAX_LONGITUDE + 0.000004);
-						NE = new LatLng(MAX_LATITUDE + 0.000004,MAX_LONGITUDE + 0.000004);
-						SW = new LatLng(MIN_LATITUDE - 0.000004,MIN_LONGITUDE - 0.000004);
-						SE = new LatLng(MAX_LATITUDE + 0.000004,MIN_LONGITUDE - 0.000004);
 					}
 					
 					
-					gplist.add(myPoint);
+						gplist.add(myPoint);
+						postman.obtainMessage(TMap.PLOT_ON_OVERLAY,
+								-1, -1, null).sendToTarget();
+					//}
 					
-			    	postman.obtainMessage(TMap.PLOT_ON_OVERLAY,
-							-1, -1, null).sendToTarget();
+					
+			    	
 
 				break;
 				case MAP_DRAW_OVERLAY:
@@ -200,9 +234,16 @@ public class TMap extends Activity {
 		}
 	};
 	
+	void updateBounds(){
+		NW = new LatLng(MIN_LATITUDE - LATDELTA,MAX_LONGITUDE + LONDELTA);
+		NE = new LatLng(MAX_LATITUDE + LATDELTA,MAX_LONGITUDE + LONDELTA);
+		SW = new LatLng(MIN_LATITUDE - LATDELTA,MIN_LONGITUDE - LONDELTA);
+		SE = new LatLng(MAX_LATITUDE + LATDELTA,MIN_LONGITUDE - LONDELTA);
+	}
+	
 	public void reset_action(){
 		gplist.clear();
-		gplist.add(new LatLng(0,0));
+		gplist.add(new RTKPoint(2,new LatLng(0,0)));
 		postman.obtainMessage(TMap.PLOT_ON_OVERLAY,
 					-1, -1, null).sendToTarget();
 		pathPivots.clear();
@@ -259,7 +300,9 @@ public class TMap extends Activity {
 	}
 	
 	@Override
-	 public boolean onOptionsItemSelected(MenuItem item) {
+	public boolean onOptionsItemSelected(MenuItem item) {
+			double STEPSIZE = 0.00000025;
+
 	    	switch(item.getItemId()){
 	    		case R.id.action_connect:
 	    			connect_action();
@@ -279,12 +322,95 @@ public class TMap extends Activity {
 	    			
 	    			break;
 	    		case R.id.action_expand:
-	    			double dx = GeoUtil.distanceInMeter(NW, NE);
-	    			Log.i("isoblue","distX " + dx);
+	    			/*
+	    			   NW------NE
+	    			   |        |
+	    			   |        |
+	    			   |        |
+	    			   SW------SE
+	    			  	    			 */
+	    			Log.i("Tmap","Expansion Mode");
+	    			useManualScrolling=false;
+	    			
+	    			break;
+	    		case R.id.action_zoomin:
+	    			useManualScrolling = true;
 
+//	    			if(MAX_LATITUDE - STEPSIZE > MIN_LATITUDE -STEPSIZE){
+		    			MIN_LATITUDE += STEPSIZE;
+		    			MAX_LATITUDE -= STEPSIZE;
+		    			
+		    			Log.i("maxLat",MAX_LATITUDE + "," + MAX_LONGITUDE);
+		    			updateBounds();
+//	    			}else{
+//	    				postman.obtainMessage(TMap.SHOW_TOAST,
+//	    						-1, -1, "Max Zoom").sendToTarget();
+//	    		x`	}
+
+	    			break;
+	    			
+	    		case R.id.action_zoomout:
+
+	    			MIN_LATITUDE -= STEPSIZE;
+	    			MAX_LATITUDE += STEPSIZE;
+	    			
+	    			updateBounds();
+	    			
 	    			break;
 	    	}
 	    	return true;
+	    }
+	
+	public class MyGestureDetector extends SimpleOnGestureListener {
+		
+	        @Override
+	        public boolean onScroll(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+	            try {
+	                if (Math.abs(e1.getY() - e2.getY()) > SWIPE_MAX_OFF_PATH)
+	                    return false;
+	                
+	                double dx = e2.getX() - e1.getX();
+	                double dy = e2.getY() - e1.getY();
+	                Log.i("scroll motion", "dx: " + dx + " dy: " + dy);
+	                useManualScrolling = true;
+	                
+	                float DELTA_SCROLL = 0.0000001f;
+	                
+	                if(dx > 0){
+	                	NE = new LatLng(NE.latitude - DELTA_SCROLL,NE.longitude);
+						SE = new LatLng(SE.latitude - DELTA_SCROLL,SE.longitude);
+						SW = new LatLng(SW.latitude - DELTA_SCROLL,SW.longitude);
+						NW = new LatLng(NW.latitude - DELTA_SCROLL,NW.longitude);
+	                }else if(dx < 0){
+	                	NE = new LatLng(NE.latitude + DELTA_SCROLL,NE.longitude);
+						SE = new LatLng(SE.latitude + DELTA_SCROLL,SE.longitude);
+						SW = new LatLng(SW.latitude + DELTA_SCROLL,SW.longitude);
+						NW = new LatLng(NW.latitude + DELTA_SCROLL,NW.longitude);
+	                }
+					
+	                if(dy > 0){
+	                	NE = new LatLng(NE.latitude,NE.longitude+ DELTA_SCROLL);
+						SE = new LatLng(SE.latitude,SE.longitude+ DELTA_SCROLL);
+						SW = new LatLng(SW.latitude,SW.longitude+ DELTA_SCROLL);
+						NW = new LatLng(NW.latitude,NW.longitude+ DELTA_SCROLL);
+	                }else if(dx < 0){
+	                	NE = new LatLng(NE.latitude,NE.longitude - DELTA_SCROLL);
+						SE = new LatLng(SE.latitude,SE.longitude - DELTA_SCROLL);
+						SW = new LatLng(SW.latitude,SW.longitude - DELTA_SCROLL);
+						NW = new LatLng(NW.latitude,NW.longitude - DELTA_SCROLL);
+	                }
+	                
+	                
+	            } catch (Exception e) {
+	                // nothing
+	            }
+	            return false;
+	        }
+
+	            @Override
+	        public boolean onDown(MotionEvent e) {
+	              return true;
+	        }
 	    }
 	
 	private class NetTask extends AsyncTask<URL, Integer, Long> {
@@ -363,25 +489,27 @@ public class TMap extends Activity {
 			 
 			 //Set Boundaries
 			 Canvas canvas = new Canvas(image);
-			 Paint redfp  = new Paint();
-			 redfp.setColor(Color.BLACK);
-			 redfp.setStrokeWidth(10);
-			 
+			 Paint redfp  = new Paint();	 
 			 Paint greenfp  = new Paint();
-			 greenfp.setColor(Color.BLUE);
-			 greenfp.setStrokeWidth(10);
-			 
+			 Paint gridFp  = new Paint();
 			 Paint pathPaint = new Paint();
+			 Paint grayfp  = new Paint();	 
+
+			 gridFp.setColor(Color.GRAY);
+			 gridFp.setStrokeWidth(1);
+			 gridFp.setStyle(Style.STROKE);
+			 gridFp.setPathEffect(new DashPathEffect(new float[] {10,20}, 0));
 			 pathPaint.setColor(getResources().getColor(R.color.raserpink));
 			 pathPaint.setStrokeWidth(2);
 			 pathPaint.setAntiAlias(true);
+			 greenfp.setColor(Color.BLUE);
+			 greenfp.setStrokeWidth(10);
+			 redfp.setColor(Color.BLACK);
+			 redfp.setStrokeWidth(10);
+			 grayfp.setColor(Color.GRAY);
+			 grayfp.setStrokeWidth(1);
 
-			/*for(int i = 0; i< canvas_width; i++){
-			 canvas.drawPoint(0, i, redfp);
-			 canvas.drawPoint(i, 0, redfp);
-			 canvas.drawPoint(canvas_width - 1, i, redfp);
-			 canvas.drawPoint(i, canvas_width, redfp);
-			 }*/
+
 			 
 			 //Calibration Points
 			 Point R1 = getApproximatePoint(NE);
@@ -397,26 +525,42 @@ public class TMap extends Activity {
 			 canvas.drawText(String.format("(%.7f,%.7f)",NW.latitude,NW.longitude), R4.x+10, R4.y+20,redfp);
 			 canvas.drawText(String.format("(%.7f,%.7f)",NE.latitude,NE.longitude), R1.x-170, R1.y+20,redfp);
 			 canvas.drawText(String.format("(%.7f,%.7f)",SE.latitude,SE.longitude), R2.x-170, R2.y-10,redfp);
+			 
+			 
+			 double METER_W = GeoUtil.distanceInMeter(new LatLng(NE.latitude,0), new LatLng(NW.latitude,0));
+			 double METER_H = GeoUtil.distanceInMeter(new LatLng(0,NW.longitude), new LatLng(0,SW.longitude));
 
-			 
-			 
-			 double METER_W = GeoUtil.distanceInMeter(new LatLng(NE.latitude,0), new LatLng(SW.latitude,0));
-			 
 			 int j;
 			 for(j = 0; j < 50; j++){
 				 canvas.drawPoint(R3.x + j, R3.y, redfp);
 			 }
+			 
 			 //canvas.drawText("Width : " + String.format("%.3f", METER_W*100/canvas_width) + " cm per pixel", R3.x + 10, R3.y - 10, greenfp);
-			 canvas.drawText(String.format("%.3f", METER_W*100*j/canvas_width) + " cm", R3.x + 10, R3.y - 10, redfp);
+			 
+			 canvas.drawText(String.format("%.3f", METER_W*100*j/canvas_width) + " cm", R3.x + 5, R3.y - 10, redfp);
+			 
+			 double unit_width = METER_W*100*j/canvas_width;
+			 double unit_height = METER_H*100*j/canvas_height;
 
-			 Log.i("uniduc", gplist.get(gplist.size() -1).latitude + " LAT");
+			 int k;
+			 for(k=R3.x;k<=(canvas_width/unit_width);k++){ //k is number of unit block
+				 canvas.drawLine(k*j, 0, k*j, canvas_height, gridFp);
+				 
+			 }
+			 for(k=R3.x;k<=(canvas_height/unit_height);k++){ //k is number of unit block
+				 canvas.drawLine(0, k*j, canvas_width, k*j, gridFp);
+				 
+			 }
+			 
+			 Log.i("uniduc", gplist.get(gplist.size() -1).coordinate.latitude + " LAT");
 			 
 			 Point PreviousQ = null;
 			 LatLng PreviousC = null;
 			 int path_idx = 0; 
 			 //Draw
 			 for(curpixel_idx = 1; curpixel_idx < gplist.size(); curpixel_idx++){
-				 LatLng C = gplist.get(curpixel_idx);
+				 RTKPoint C_RTK = gplist.get(curpixel_idx);
+				 LatLng C = C_RTK.coordinate;
 				 Point Q = getApproximatePoint(C);
 				 
 				if(PreviousQ != null && ! GeoUtil.SamePoint(PreviousQ,Q)){
@@ -425,10 +569,20 @@ public class TMap extends Activity {
 							//Unless you jump
 							//Just don't jump
 							
-							 canvas.drawLine(PreviousQ.x, PreviousQ.y, Q.x, Q.y, pathPaint);
+							 
+							 if(C_RTK.QValue != 1){
+								 canvas.drawCircle(Q.x, Q.y,5, grayfp);
+							 }else{
+								 canvas.drawLine(PreviousQ.x, PreviousQ.y, Q.x, Q.y, pathPaint);
+							 }
 							 
 							 if(curpixel_idx == gplist.size() - 1){
-								 canvas.drawText(String.format("(%.7f,%.7f)",C.latitude,C.longitude),Q.x + (float)Math.random()*30,Q.y+(float)Math.random()*30,pathPaint);
+								 //show coordinate
+								 float locaX = Q.x + (float)Math.random()*30;
+								 float locaY = Q.y+(float)Math.random()*30;
+								 
+								 canvas.drawText(String.format("(%.7f,%.7f)",C.latitude,C.longitude),locaX,locaY,pathPaint);
+								 canvas.drawCircle(Q.x, Q.y,3, pathPaint);
 							 }
 							 
 						}
